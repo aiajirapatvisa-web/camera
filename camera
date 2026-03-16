@@ -1,1 +1,464 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no,viewport-fit=cover">
+  <title>Signature Camera</title>
+  <!--
+  ════════════════════════════════════════════════════════
+   DEPLOY ไฟล์นี้บน GitHub Pages หรือ Netlify
+   URL ตัวอย่าง: https://YOUR_USERNAME.github.io/signature-cam/camera.html
 
+   หน้านี้:
+   1. ขอสิทธิ์กล้องจากผู้ใช้ (top-level HTTPS = popup ขึ้น)
+   2. แสดง modal เลือกกล้อง (Camo, OBS, etc.)
+   3. ถ่ายรูป → postMessage กลับ window.opener
+   4. ปิดตัวเองอัตโนมัติ
+  ════════════════════════════════════════════════════════
+  -->
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+:root{--g:#c5a059;--gl:#f0d98a;--gd:#7a4d0a;--dark:#04090f;--navy:#080f1e}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{font-family:'Prompt',sans-serif;background:var(--dark);color:#fff;height:100dvh;overflow:hidden;-webkit-font-smoothing:antialiased}
+
+/* video */
+#vid{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#111}
+#vid.mirror{transform:scaleX(-1)}
+
+/* gold btn */
+.btn-gold{background:linear-gradient(90deg,var(--gd),var(--gl),var(--g),var(--gl),var(--gd));background-size:300% auto;animation:shine 2.5s linear infinite;color:var(--dark);font-weight:700;font-family:'Prompt',sans-serif;border:none;cursor:pointer;text-transform:uppercase;letter-spacing:.08em;border-radius:16px;font-size:14px;padding:15px 32px;width:100%;max-width:290px;transition:transform .12s}
+.btn-gold:active{transform:scale(.96)}
+.btn-gold:disabled{animation:none;background:#1c1c1c;color:#333;cursor:not-allowed}
+@keyframes shine{to{background-position:300% center}}
+
+/* screens */
+.scr{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:28px 24px;text-align:center;background:linear-gradient(145deg,#030810,var(--dark))}
+.scr.hide{display:none}
+
+/* rings */
+.rings{position:relative;width:76px;height:76px;margin:0 auto 4px}
+.ra,.rb{position:absolute;border-radius:50%;border:1px solid rgba(197,160,89,.18)}
+.ra{inset:0;animation:pr 2.4s ease-in-out infinite}
+.rb{inset:12px;animation:pr 2.4s ease-in-out .4s infinite}
+.rc{position:absolute;inset:24px;border-radius:50%;border:1px solid rgba(197,160,89,.5);background:rgba(197,160,89,.06);display:flex;align-items:center;justify-content:center}
+@keyframes pr{0%,100%{transform:scale(1);opacity:.5}50%{transform:scale(1.1);opacity:.12}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:34px;height:34px;border-radius:50%;border:2px solid rgba(197,160,89,.12);border-top-color:var(--g);animation:spin .7s linear infinite}
+
+.ey{font-size:8px;color:rgba(197,160,89,.35);letter-spacing:.45em;text-transform:uppercase}
+.scr h2{font-size:17px;font-weight:700;color:#fff}
+.scr .sub{font-size:12px;color:rgba(255,255,255,.32);line-height:1.75;max-width:260px}
+
+/* denied screen */
+.icon-deny{width:62px;height:62px;border-radius:50%;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.28);display:flex;align-items:center;justify-content:center;margin:0 auto 4px}
+.steps{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:16px 18px;width:100%;max-width:320px;text-align:left}
+.sr{display:flex;gap:10px;align-items:flex-start;margin-bottom:10px}
+.sr:last-child{margin-bottom:0}
+.sn{width:22px;height:22px;border-radius:50%;flex-shrink:0;background:rgba(197,160,89,.14);border:1px solid rgba(197,160,89,.28);font-size:10px;font-weight:700;color:var(--g);display:flex;align-items:center;justify-content:center;margin-top:1px}
+.st{font-size:11px;color:rgba(255,255,255,.5);line-height:1.65}
+.st b{color:rgba(197,160,89,.85)}
+.key{display:inline-block;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);border-radius:4px;padding:1px 6px;font-size:10px;font-family:monospace;color:#fff}
+.btn-retry{background:rgba(197,160,89,.1);border:1px solid rgba(197,160,89,.28);color:var(--g);font-family:'Prompt',sans-serif;font-weight:600;font-size:12px;padding:10px 24px;border-radius:12px;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;width:100%;max-width:290px;transition:background .2s}
+.btn-retry:hover{background:rgba(197,160,89,.18)}
+
+/* camera modal */
+#modal{position:fixed;inset:0;z-index:400;background:rgba(0,0,0,.88);display:none;flex-direction:column;align-items:center;justify-content:center;padding:20px}
+#modal.show{display:flex}
+.mbox{background:var(--navy);border:1px solid rgba(197,160,89,.22);border-radius:20px;padding:22px 18px;width:100%;max-width:340px;max-height:90vh;display:flex;flex-direction:column}
+.mbox h3{font-size:14px;font-weight:600;color:#fff;text-align:center;margin:0 0 3px}
+.mhint{font-size:9px;color:rgba(197,160,89,.4);text-align:center;margin:0 0 14px;letter-spacing:.1em;text-transform:uppercase}
+#camList{display:flex;flex-direction:column;gap:6px;overflow-y:auto;max-height:44vh}
+.ci{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:11px;cursor:pointer;border:1px solid rgba(197,160,89,.12);background:rgba(255,255,255,.04);transition:all .2s}
+.ci:hover,.ci:active{background:rgba(197,160,89,.09);border-color:rgba(197,160,89,.4)}
+.ci.sel{background:rgba(197,160,89,.13);border-color:var(--g)}
+.ci-ico{width:34px;height:34px;border-radius:50%;background:rgba(197,160,89,.09);border:1px solid rgba(197,160,89,.22);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ci-inf{flex:1;min-width:0}
+.ci-nm{font-size:12px;color:#fff;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ci-tp{font-size:9px;color:rgba(197,160,89,.42);text-transform:uppercase;letter-spacing:.07em;margin-top:1px}
+.sel-dot{width:7px;height:7px;border-radius:50%;background:#4ade80;flex-shrink:0}
+.mfoot{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;flex-shrink:0}
+.mbtn{padding:11px;border-radius:11px;font-size:12px;font-family:'Prompt',sans-serif;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:.06em;border:none;transition:all .2s}
+.mc{background:rgba(255,255,255,.06);color:rgba(255,255,255,.45);border:1px solid rgba(255,255,255,.08)!important}
+.mo{background:linear-gradient(90deg,var(--gd),var(--gl),var(--g),var(--gl),var(--gd));background-size:300% auto;animation:shine 2.5s linear infinite;color:var(--dark)}
+.mo:disabled{animation:none;background:#1c1c1c;color:#2a2a2a;cursor:not-allowed}
+#modalErr{font-size:10px;color:rgba(239,68,68,.8);text-align:center;margin-top:8px;display:none}
+
+/* camera live UI */
+#camUI{position:fixed;inset:0;z-index:10;display:none;flex-direction:column;justify-content:space-between;pointer-events:none}
+#camUI.show{display:flex}
+.topbar{padding:max(env(safe-area-inset-top),14px) 18px 12px;background:linear-gradient(to bottom,rgba(0,0,0,.72),transparent);display:flex;justify-content:space-between;align-items:center;pointer-events:all}
+.topbar h1{font-size:12px;font-weight:700;color:var(--g);letter-spacing:.18em;text-transform:uppercase}
+.rrow{display:flex;gap:6px}
+.rb-btn{padding:4px 11px;border-radius:20px;font-size:10px;font-family:'Prompt',sans-serif;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;border:1px solid rgba(197,160,89,.35);background:rgba(0,0,0,.45);color:rgba(255,255,255,.45);transition:all .2s}
+.rb-btn.on{border-color:var(--g);background:rgba(197,160,89,.2);color:var(--g)}
+.botbar{padding:14px 24px max(env(safe-area-inset-bottom),14px);background:linear-gradient(to top,rgba(0,0,0,.8),transparent);display:flex;align-items:center;justify-content:space-between;pointer-events:all}
+.iconbtn{width:46px;height:46px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background .15s}
+.iconbtn:active{background:rgba(255,255,255,.25)}
+#shutter{width:70px;height:70px;border-radius:50%;border:3px solid #fff;cursor:pointer;background:transparent;position:relative;flex-shrink:0;transition:transform .1s}
+#shutter::after{content:'';position:absolute;inset:5px;border-radius:50%;background:#fff;transition:transform .1s}
+#shutter:active{transform:scale(.92)}
+#shutter:active::after{transform:scale(.87)}
+#shutter.gold{border-color:var(--g)}
+#shutter.gold::after{background:var(--g)}
+
+/* guide frames */
+.guide{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);border:1.5px solid rgba(197,160,89,.5);border-radius:10px;pointer-events:none;z-index:5;display:none}
+.guide.show{display:block}
+.gc{position:absolute;width:16px;height:16px}
+.gc-tl{top:-1px;left:-1px;border-top:2px solid var(--g);border-left:2px solid var(--g);border-radius:2px 0 0 0}
+.gc-tr{top:-1px;right:-1px;border-top:2px solid var(--g);border-right:2px solid var(--g);border-radius:0 2px 0 0}
+.gc-bl{bottom:-1px;left:-1px;border-bottom:2px solid var(--g);border-left:2px solid var(--g);border-radius:0 0 0 2px}
+.gc-br{bottom:-1px;right:-1px;border-bottom:2px solid var(--g);border-right:2px solid var(--g);border-radius:0 0 2px 0}
+
+#flash{position:fixed;inset:0;z-index:50;background:#fff;opacity:0;pointer-events:none;transition:opacity .1s}
+
+/* preview */
+#prev{position:fixed;inset:0;z-index:300;background:rgba(0,0,0,.96);display:none;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px}
+#prev.show{display:flex}
+#prevImg{max-width:100%;max-height:58vh;border-radius:12px;border:1px solid rgba(197,160,89,.3);object-fit:contain}
+.pbtns{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;max-width:300px}
+.pbtns button{padding:14px;border-radius:14px;font-size:13px;font-family:'Prompt',sans-serif;font-weight:700;cursor:pointer;border:none;text-transform:uppercase;letter-spacing:.07em}
+#btnRetake{background:rgba(255,255,255,.08);color:rgba(255,255,255,.65);border:1px solid rgba(255,255,255,.14)!important}
+#btnConfirm{background:linear-gradient(90deg,var(--gd),var(--gl),var(--g),var(--gl),var(--gd));background-size:300% auto;animation:shine 2.5s linear infinite;color:var(--dark)}
+
+/* status */
+#badge{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(4,9,15,.93);border:1px solid rgba(197,160,89,.35);border-radius:12px;padding:14px 28px;font-size:13px;color:var(--g);text-align:center;z-index:600;display:none;white-space:nowrap}
+#badge.show{display:block}
+#badge.ok{border-color:rgba(74,222,128,.4);color:#4ade80}
+  </style>
+</head>
+<body>
+
+<!-- SCREEN: checking -->
+<div class="scr" id="scrCheck">
+  <div class="spinner"></div>
+  <p style="font-size:11px;color:rgba(197,160,89,.4);letter-spacing:.1em">ตรวจสอบสิทธิ์กล้อง...</p>
+</div>
+
+<!-- SCREEN: prompt (ยังไม่เคยอนุญาต) -->
+<div class="scr hide" id="scrPrompt">
+  <div class="rings"><div class="ra"></div><div class="rb"></div>
+    <div class="rc">
+      <svg width="22" height="22" fill="none" stroke="#c5a059" stroke-width="1.4" viewBox="0 0 24 24">
+        <path d="M15 10l4.553-2.277A1 1 0 0121 8.693v6.614a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+      </svg>
+    </div>
+  </div>
+  <p class="ey">The Signature</p>
+  <h2>เลือกกล้องถ่ายรูป</h2>
+  <p class="sub">กดปุ่มด้านล่าง แล้วกด <b style="color:#c5a059">Allow</b><br>เมื่อ browser ถามอนุญาตกล้อง</p>
+  <button class="btn-gold" id="btnPrompt" onclick="doRequestCamera()">🎥  เลือกกล้อง</button>
+  <p id="promptErr" style="font-size:11px;color:rgba(239,68,68,.8);display:none;max-width:270px;line-height:1.6"></p>
+</div>
+
+<!-- SCREEN: denied (เคย block) -->
+<div class="scr hide" id="scrDenied">
+  <div class="icon-deny">
+    <svg width="28" height="28" fill="none" stroke="rgba(239,68,68,.7)" stroke-width="1.5" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/><path d="M4.93 4.93l14.14 14.14"/>
+    </svg>
+  </div>
+  <p class="ey">The Signature</p>
+  <h2 style="color:rgba(239,68,68,.85)">กล้องถูกบล็อก</h2>
+  <p class="sub" style="color:rgba(255,255,255,.38)">ต้องอนุญาตกล้องก่อน ทำตามขั้นตอนด้านล่าง</p>
+
+  <div class="steps">
+    <div class="sr">
+      <div class="sn">1</div>
+      <div class="st">กดไอคอน <b>🔒</b> ที่ URL bar ด้านบนของหน้าต่างนี้</div>
+    </div>
+    <div class="sr">
+      <div class="sn">2</div>
+      <div class="st">เลือก <b>"Site settings"</b> หรือ <b>"Permissions"</b></div>
+    </div>
+    <div class="sr">
+      <div class="sn">3</div>
+      <div class="st">ค้นหา <b>Camera</b> → เปลี่ยนจาก <span style="color:rgba(239,68,68,.8)">Block</span> เป็น <b style="color:#4ade80">Allow</b></div>
+    </div>
+    <div class="sr">
+      <div class="sn">4</div>
+      <div class="st">กด <b>↩ ลองใหม่</b> ด้านล่าง</div>
+    </div>
+  </div>
+
+  <button class="btn-retry" onclick="retryPermission()">↩  ลองใหม่</button>
+
+  <div style="background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:10px 14px;width:100%;max-width:310px;text-align:left">
+    <p style="font-size:9px;color:rgba(197,160,89,.4);text-transform:uppercase;letter-spacing:.1em;margin:0 0 5px">Chrome shortcut</p>
+    <p style="font-size:10px;color:rgba(255,255,255,.3);line-height:1.7;margin:0">
+      พิมพ์ใน URL bar: <span class="key">chrome://settings/content/camera</span><br>
+      หา <b style="color:rgba(197,160,89,.6)">YOUR_DOMAIN</b> → เปลี่ยนเป็น Allow
+    </p>
+  </div>
+</div>
+
+<!-- CAMERA SELECT MODAL -->
+<div id="modal">
+  <div class="mbox">
+    <h3>เลือกกล้อง</h3>
+    <p class="mhint">Camera Source</p>
+    <div id="camList"></div>
+    <p id="modalErr"></p>
+    <div class="mfoot">
+      <button class="mbtn mc" onclick="closeModal()">ยกเลิก</button>
+      <button class="mbtn mo" id="btnOK" onclick="openSelectedCam()" disabled>เปิดกล้อง</button>
+    </div>
+  </div>
+</div>
+
+<video id="vid" autoplay playsinline muted></video>
+
+<div class="guide show" id="g916" style="width:min(62vw,176px);aspect-ratio:9/16">
+  <div class="gc gc-tl"></div><div class="gc gc-tr"></div><div class="gc gc-bl"></div><div class="gc gc-br"></div>
+</div>
+<div class="guide" id="g169" style="width:min(84vw,294px);aspect-ratio:16/9">
+  <div class="gc gc-tl"></div><div class="gc gc-tr"></div><div class="gc gc-bl"></div><div class="gc gc-br"></div>
+</div>
+<div id="flash"></div>
+
+<div id="camUI">
+  <div class="topbar">
+    <h1>The Signature</h1>
+    <div class="rrow">
+      <button class="rb-btn on" id="rb916" onclick="setRatio('916')">9:16</button>
+      <button class="rb-btn"    id="rb169" onclick="setRatio('169')">16:9</button>
+    </div>
+  </div>
+  <div class="botbar">
+    <div class="iconbtn" onclick="flipCam()">
+      <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="1.8" viewBox="0 0 24 24">
+        <path d="M4 4v5h5M20 20v-5h-5M4 9a9 9 0 0114.93-4.93M20 15A9 9 0 015.07 19.93"/>
+      </svg>
+    </div>
+    <button id="shutter" onclick="shoot()"></button>
+    <div class="iconbtn" onclick="doRequestCamera()">
+      <svg width="20" height="20" fill="none" stroke="#fff" stroke-width="1.8" viewBox="0 0 24 24">
+        <path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/>
+      </svg>
+    </div>
+  </div>
+</div>
+
+<div id="prev">
+  <p style="font-size:9px;color:rgba(197,160,89,.4);letter-spacing:.15em;text-transform:uppercase">ยืนยันรูป?</p>
+  <img id="prevImg" alt="">
+  <div class="pbtns">
+    <button id="btnRetake"  onclick="retake()">↩ ถ่ายใหม่</button>
+    <button id="btnConfirm" onclick="sendPhoto()">✓ ใช้รูปนี้</button>
+  </div>
+</div>
+
+<div id="badge"></div>
+<canvas id="cvs" style="display:none"></canvas>
+
+<script>
+/* STATE */
+let stream=null, facing='user', ratio='916', selectedId=null, allDevs=[], captured=null;
+const VIRT=['camo','reincubate','obs','manycam','droidcam','snap camera','epoccam','ivcam','xsplit','splitcam','ndi','virtual','vcam','elgato','mmhmm'];
+const isVirt=l=>VIRT.some(k=>l.toLowerCase().includes(k));
+
+/* SHOW SCREEN */
+function show(id){['scrCheck','scrPrompt','scrDenied'].forEach(s=>{const el=document.getElementById(s);if(el)el.className='scr'+(s!==id?' hide':'')});}
+
+/* ════════════════════════════════
+   INIT — check permission state
+════════════════════════════════ */
+window.addEventListener('load',async()=>{
+  try{
+    if(navigator.permissions){
+      const p=await navigator.permissions.query({name:'camera'});
+      if(p.state==='granted'){show('scrCheck');await grantedFlow();return;}
+      if(p.state==='denied'){show('scrDenied');return;}
+      show('scrPrompt');
+      p.onchange=()=>{
+        if(p.state==='granted'){show('scrCheck');grantedFlow();}
+        else if(p.state==='denied')show('scrDenied');
+        else show('scrPrompt');
+      };
+    }else{show('scrPrompt');}
+  }catch(e){show('scrPrompt');}
+});
+
+/* ════════════════════════════════
+   GRANTED FLOW
+════════════════════════════════ */
+async function grantedFlow(){
+  try{
+    const tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+    tmp.getTracks().forEach(t=>t.stop());
+    const d=await navigator.mediaDevices.enumerateDevices();
+    allDevs=d.filter(x=>x.kind==='videoinput');
+    buildList();
+    document.getElementById('modal').classList.add('show');
+    show('scrCheck'); document.getElementById('scrCheck').className='scr hide';
+  }catch(e){handleErr(e,'promptErr');show('scrPrompt');}
+}
+
+/* ════════════════════════════════
+   REQUEST CAMERA — USER GESTURE
+   ❗ ต้องเรียกจาก onclick โดยตรง
+════════════════════════════════ */
+async function doRequestCamera(){
+  const errEl=document.getElementById('promptErr');
+  const btn=document.getElementById('btnPrompt');
+  if(btn){btn.disabled=true;btn.textContent='⏳ กำลังขอสิทธิ์...';}
+  if(errEl)errEl.style.display='none';
+  try{
+    const tmp=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+    tmp.getTracks().forEach(t=>t.stop());
+    const d=await navigator.mediaDevices.enumerateDevices();
+    allDevs=d.filter(x=>x.kind==='videoinput');
+    if(btn){btn.disabled=false;btn.textContent='🎥  เลือกกล้อง';}
+    buildList();
+    document.getElementById('modal').classList.add('show');
+    show('scrCheck'); document.getElementById('scrCheck').className='scr hide';
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent='🎥  เลือกกล้อง';}
+    if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){show('scrDenied');}
+    else{if(errEl){errEl.textContent=errMsg(e);errEl.style.display='block';}}
+  }
+}
+
+async function retryPermission(){
+  show('scrCheck');
+  try{
+    const p=await navigator.permissions.query({name:'camera'});
+    if(p.state==='denied'){show('scrDenied');showBadge('⚠ ยังบล็อกอยู่ ทำตามขั้นตอนอีกครั้ง','',3000);}
+    else await grantedFlow();
+  }catch(e){show('scrPrompt');}
+}
+
+/* BUILD LIST */
+function buildList(){
+  const list=document.getElementById('camList');
+  list.innerHTML='';
+  if(!allDevs.length){list.innerHTML='<p style="font-size:11px;color:rgba(255,255,255,.3);text-align:center;padding:16px 0">ไม่พบกล้อง<br>เปิด Camo หรือเสียบกล้องก่อน</p>';return;}
+  const sorted=[...allDevs].sort((a,b)=>isVirt(a.label||'')&&!isVirt(b.label||'')?-1:!isVirt(a.label||'')&&isVirt(b.label||'')?1:0);
+  sorted.forEach((d,i)=>{
+    const lbl=d.label||`Camera ${i+1}`;
+    const virt=isVirt(lbl);
+    const item=document.createElement('div');
+    item.className='ci'+(i===0?' sel':'');
+    item.dataset.id=d.deviceId;
+    if(i===0)selectedId=d.deviceId;
+    item.innerHTML=`
+      <div class="ci-ico">
+        ${virt?`<svg width="14" height="14" fill="none" stroke="#c5a059" stroke-width="1.5" viewBox="0 0 24 24"><rect x="2" y="7" width="15" height="10" rx="2"/><path d="M17 9l4-2v10l-4-2"/></svg>`
+              :`<svg width="14" height="14" fill="none" stroke="#c5a059" stroke-width="1.5" viewBox="0 0 24 24"><path d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><circle cx="12" cy="13" r="3"/></svg>`}
+      </div>
+      <div class="ci-inf">
+        <div class="ci-nm">${lbl}</div>
+        <div class="ci-tp">${virt?'⭐ Virtual / Camo / OBS':'Physical Camera'}</div>
+      </div>
+      ${i===0?'<div class="sel-dot"></div>':''}`;
+    item.onclick=()=>{
+      document.querySelectorAll('.ci').forEach(el=>{el.classList.remove('sel');const dot=el.querySelector('.sel-dot');if(dot)dot.remove();});
+      item.classList.add('sel');
+      const dot=document.createElement('div');dot.className='sel-dot';item.appendChild(dot);
+      selectedId=d.deviceId;document.getElementById('btnOK').disabled=false;
+    };
+    list.appendChild(item);
+  });
+  document.getElementById('btnOK').disabled=false;
+}
+
+function closeModal(){
+  document.getElementById('modal').classList.remove('show');
+  if(!stream)show('scrPrompt');
+}
+
+async function openSelectedCam(){
+  const errEl=document.getElementById('modalErr');
+  const btnOK=document.getElementById('btnOK');
+  errEl.style.display='none';btnOK.disabled=true;btnOK.textContent='⏳ กำลังเปิด...';
+  try{
+    if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{deviceId:selectedId?{exact:selectedId}:undefined,width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30}},
+      audio:false
+    });
+    const vid=document.getElementById('vid');vid.srcObject=stream;await vid.play();
+    const selDev=allDevs.find(d=>d.deviceId===selectedId);
+    const lbl=((selDev?selDev.label:'')||'').toLowerCase();
+    const front=lbl.includes('front')||lbl.includes('user')||lbl.includes('facetime')||lbl.includes('built-in');
+    facing=front?'user':'environment';vid.className=front?'mirror':'';
+    document.getElementById('modal').classList.remove('show');
+    document.getElementById('camUI').classList.add('show');
+    btnOK.disabled=false;btnOK.textContent='เปิดกล้อง';
+  }catch(e){
+    btnOK.disabled=false;btnOK.textContent='เปิดกล้อง';
+    if(e.name==='NotAllowedError'){document.getElementById('modal').classList.remove('show');show('scrDenied');}
+    else{errEl.textContent=errMsg(e);errEl.style.display='block';}
+  }
+}
+
+async function flipCam(){
+  facing=facing==='user'?'environment':'user';
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  try{
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:facing}},audio:false});
+    const vid=document.getElementById('vid');vid.srcObject=stream;await vid.play();vid.className=facing==='user'?'mirror':'';
+  }catch(e){}
+}
+
+function setRatio(r){
+  ratio=r;
+  document.getElementById('rb916').className='rb-btn'+(r==='916'?' on':'');
+  document.getElementById('rb169').className='rb-btn'+(r==='169'?' on':'');
+  document.getElementById('g916').className='guide'+(r==='916'?' show':'');
+  document.getElementById('g169').className='guide'+(r==='169'?' show':'');
+  const s=document.getElementById('shutter');s.className=r==='916'?'gold':'';
+}
+
+function shoot(){
+  if(!stream)return;
+  const vid=document.getElementById('vid'),cvs=document.getElementById('cvs');
+  cvs.width=ratio==='916'?720:1280;cvs.height=ratio==='916'?1280:720;
+  const ctx=cvs.getContext('2d'),vw=vid.videoWidth||cvs.width,vh=vid.videoHeight||cvs.height;
+  const sc=Math.max(cvs.width/vw,cvs.height/vh),dw=vw*sc,dh=vh*sc,dx=(cvs.width-dw)/2,dy=(cvs.height-dh)/2;
+  const m=vid.classList.contains('mirror');
+  if(m){ctx.save();ctx.translate(cvs.width,0);ctx.scale(-1,1);}
+  ctx.drawImage(vid,dx,dy,dw,dh);
+  if(m)ctx.restore();
+  captured=cvs.toDataURL('image/jpeg',.90);
+  const fl=document.getElementById('flash');fl.style.opacity='1';setTimeout(()=>fl.style.opacity='0',120);
+  document.getElementById('prevImg').src=captured;document.getElementById('prev').classList.add('show');
+}
+
+function retake(){captured=null;document.getElementById('prev').classList.remove('show');}
+
+function sendPhoto(){
+  if(!captured)return;
+  document.getElementById('prev').classList.remove('show');
+  showBadge('⏳ กำลังส่งรูป...','',0);
+  const msg={type:'SIGNATURE_PHOTO',image:captured,ratio:ratio==='916'?'9x16':'16x9',frame:ratio};
+  if(window.opener&&!window.opener.closed){window.opener.postMessage(msg,'*');}
+  showBadge('✅ ส่งรูปสำเร็จ! ปิดหน้าต่างนี้ได้เลย','ok',0);
+  setTimeout(()=>window.close(),2200);
+}
+
+function showBadge(msg,type,ms){
+  const el=document.getElementById('badge');el.textContent=msg;el.className='show'+(type?' '+type:'');
+  if(ms>0)setTimeout(()=>el.classList.remove('show'),ms);
+}
+
+function handleErr(e,elId){
+  if(e.name==='NotAllowedError'||e.name==='PermissionDeniedError'){show('scrDenied');}
+  else{const el=document.getElementById(elId);if(el){el.textContent=errMsg(e);el.style.display='block';}}
+}
+
+function errMsg(e){
+  if(e.name==='NotFoundError')return '🔌 ไม่พบกล้อง — เปิด Camo หรือเสียบกล้องก่อน';
+  if(e.name==='NotReadableError')return '🚫 กล้องถูกใช้งานอยู่ — ปิด Zoom/Teams ก่อน';
+  return e.name+': '+e.message;
+}
+
+navigator.mediaDevices.addEventListener('devicechange',async()=>{
+  if(!stream)return;
+  const d=await navigator.mediaDevices.enumerateDevices();
+  allDevs=d.filter(x=>x.kind==='videoinput');
+});
+</script>
+</body>
+</html>
